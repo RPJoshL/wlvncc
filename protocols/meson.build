@@ -20,6 +20,7 @@ client_protocols = [
 	'viewporter-v1.xml',
 	'single-pixel-buffer-v1.xml',
 	'xdg-decoration-unstable-v1.xml',
+	'wlr-data-control-unstable-v1.xml'
 ]
 
 client_protos_src = []

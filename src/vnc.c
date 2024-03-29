@@ -23,6 +23,8 @@
 #include <pixman.h>
 #include <libdrm/drm_fourcc.h>
 #include <libavutil/frame.h>
+#include <stdio.h>
+#include <data-control.h>
 
 #include "rfbclient.h"
 #include "vnc.h"
@@ -134,6 +136,9 @@ static void vnc_client_got_cut_text(rfbClient* client, const char* text,
 
 	if (self->cut_text)
 		self->cut_text(self, text, len);
+	else {
+		printf("Cut text is not defined!\n");
+	}
 }
 
 static rfbBool vnc_client_handle_open_h264_rect(rfbClient* client,
@@ -216,7 +221,7 @@ static void vnc_client_init_pts_ext(void)
 	rfbClientRegisterExtension(&ext);
 }
 
-struct vnc_client* vnc_client_create(void)
+struct vnc_client* vnc_client_create(struct data_control* data_control)
 {
 	vnc_client_init_open_h264();
 	vnc_client_init_pts_ext();
@@ -238,6 +243,7 @@ struct vnc_client* vnc_client_create(void)
 		goto failure;
 
 	self->client = client;
+	self->data_control = data_control;
 	rfbClientSetClientData(client, NULL, self);
 
 	client->MallocFrameBuffer = vnc_client_alloc_fb;
@@ -246,6 +252,7 @@ struct vnc_client* vnc_client_create(void)
 	client->StartingFrameBufferUpdate = vnc_client_start_update;
 	client->CancelledFrameBufferUpdate = vnc_client_cancel_update;
 	client->GotXCutText = vnc_client_got_cut_text;
+	self->cut_text = cut_text;
 
 	self->pts = NO_PTS;
 
@@ -254,6 +261,11 @@ struct vnc_client* vnc_client_create(void)
 failure:
 	free(self);
 	return NULL;
+}
+
+void cut_text (struct vnc_client* self, const char* text, size_t size) {
+	data_control_to_clipboard(self->data_control, text, size);
+	//printf("Received string FROM vnc_server: %s\n", text);
 }
 
 void vnc_client_destroy(struct vnc_client* self)

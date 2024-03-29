@@ -17,6 +17,7 @@
 #pragma once
 
 #include "rfbclient.h"
+#include "data-control.h"
 
 #include <stdbool.h>
 #include <unistd.h>
@@ -36,6 +37,7 @@ struct vnc_av_frame {
 struct vnc_client {
 	rfbClient* client;
 
+	struct data_control* data_control;
 	struct open_h264* open_h264;
 	bool current_rect_is_av_frame;
 	struct vnc_av_frame* av_frames[VNC_CLIENT_MAX_AV_FRAMES];
@@ -53,7 +55,7 @@ struct vnc_client {
 	bool is_updating;
 };
 
-struct vnc_client* vnc_client_create(void);
+struct vnc_client* vnc_client_create(struct data_control* data_control);
 void vnc_client_destroy(struct vnc_client* self);
 
 int vnc_client_connect(struct vnc_client* self, const char* address, int port);
@@ -79,3 +81,4 @@ void vnc_client_set_compression_level(struct vnc_client* self, int value);
 void vnc_client_send_cut_text(struct vnc_client* self, const char* text,
 		size_t len);
 void vnc_client_clear_av_frames(struct vnc_client* self);
+void cut_text (struct vnc_client* self, const char* text, size_t size);

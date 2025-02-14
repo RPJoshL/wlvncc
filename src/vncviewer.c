@@ -183,8 +183,21 @@ static rfbCredential* ReadUsernameAndPassword(rfbClient* client)
 		return cred;
 	}
 
-	cred->userCredential.username = ReadLine("User");
-	cred->userCredential.password = ReadLineNoEcho("Password");
+  // Try to get credentials from env
+  char* username = getenv("VNC_USERNAME");
+	char* password =  getenv("VNC_PASSWORD");
+
+  if (username && password) {
+    rfbClientLog("Using username and password for VNC authentication 'VNC_USERNAME', 'VNC_PASSWORD'\n");
+    cred->userCredential.password = malloc(strlen(password) + 1);
+		cred->userCredential.username = malloc(strlen(username) + 1);
+		strcpy(cred->userCredential.password, password);
+		strcpy(cred->userCredential.username, username);
+  } else {
+    cred->userCredential.username = ReadLine("User");
+    cred->userCredential.password = ReadLineNoEcho("Password");
+  }
+
 
 	if (!cred->userCredential.username || !cred->userCredential.password) {
 		goto failure;

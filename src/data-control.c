@@ -40,7 +40,7 @@ static bool isStringEqual(int lena, char* a, int lenb, char* b) {
 	return true;
 }
 
-static void on_receive(void* handler)
+static void on_receive(struct aml_handler* handler)
 {
 	struct receive_context* ctx = aml_get_userdata(handler);
 	int fd = aml_get_fd(handler);

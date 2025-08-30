@@ -86,7 +86,7 @@ static void vnc_client_update_box(rfbClient* client, int x, int y, int width,
 			height);
 }
 
-static void vnc_client_clear_av_frames(struct vnc_client* self)
+void vnc_client_clear_av_frames(struct vnc_client* self)
 {
 	for (int i = 0; i < self->n_av_frames; ++i) {
 		av_frame_unref(self->av_frames[i]->frame);
@@ -136,9 +136,6 @@ static void vnc_client_got_cut_text(rfbClient* client, const char* text,
 
 	if (self->cut_text)
 		self->cut_text(self, text, len);
-	else {
-		printf("Cut text is not defined!\n");
-	}
 }
 
 static rfbBool vnc_client_handle_open_h264_rect(rfbClient* client,
@@ -264,6 +261,10 @@ failure:
 }
 
 void cut_text (struct vnc_client* self, const char* text, size_t size) {
+	if (!self->data_control) {
+		return;
+	}
+
 	data_control_to_clipboard(self->data_control, text, size);
 	//printf("Received string FROM vnc_server: %s\n", text);
 }

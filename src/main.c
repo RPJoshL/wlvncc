@@ -115,6 +115,7 @@ struct wp_viewporter* viewporter;
 struct wp_single_pixel_buffer_manager_v1* single_pixel_manager;
 static struct zxdg_decoration_manager_v1* decoration_manager;
 static bool decorations = true;
+static bool copy_paste = true;
 static struct data_control* data_control;
 static struct zwlr_data_control_manager_v1 *manager;
 static struct vnc_client* vnc;
@@ -150,8 +151,10 @@ static void on_seat_capability_change(struct seat* seat)
 			wl_seat_get_keyboard(seat->wl_seat);
 		keyboard_collection_add_wl_keyboard(keyboards, wl_keyboard, seat);
 
-		data_control = malloc(sizeof(data_control));
-		data_control_init(data_control, seat, manager);
+		if (copy_paste) {
+			data_control = malloc(sizeof(data_control));
+			data_control_init(data_control, seat, manager);
+		}
 	} else {
 		// TODO Remove
 	}
@@ -1079,6 +1082,7 @@ Usage: wlvncc <address> [port]\n\
     -q,--quality             Quality level (0 - 9).\n\
     -t,--tls-cert            Use given TLS cert for authenticating server.\n\
     -s,--use-sw-renderer     Use software rendering.\n\
+    --clipboard [0|1]        Wheather the clipboard copy-and-paste should be enabled (default=1)\n\
 \n\
 ");
 	return r;
@@ -1107,6 +1111,7 @@ int main(int argc, char* argv[])
 		{ "quality", required_argument, NULL, 'q' },
 		{ "tls-cert", required_argument, NULL, 't' },
 		{ "use-sw-renderer", no_argument, NULL, 's' },
+		{ "clipboard", required_argument, NULL, 'C' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -1127,6 +1132,15 @@ int main(int argc, char* argv[])
 			break;
 		case 'c':
 			compression = atoi(optarg);
+			break;
+		case 'C':
+			if (strcmp(optarg, "0") == 0) {
+				copy_paste = false;
+			} else if (strcmp(optarg, "1") == 0) {
+				copy_paste = true;
+			} else {
+				return usage(1);
+			}
 			break;
 		case 'e':
 			encodings = optarg;
@@ -1226,7 +1240,9 @@ int main(int argc, char* argv[])
 
 	vnc->alloc_fb = on_vnc_client_alloc_fb;
 	vnc->update_fb = on_vnc_client_update_fb;
-	data_control->vnc_write_clipboard = vnc_send_clipboard;
+	if (data_control) {
+		data_control->vnc_write_clipboard = vnc_send_clipboard;
+	}
 
 	uint32_t format = have_egl ? dmabuf_format : shm_format;
 

@@ -798,13 +798,6 @@ void on_keyboard_event(struct keyboard_collection* collection,
 	// TODO handle multiple symbols
 	xkb_keysym_t symbol = xkb_state_key_get_one_sym(keyboard->state, key);
 
-	if (symbol == XKB_KEY_F12) {
-		if (!is_pressed) {
-			inhibitor_toggle(inhibitor, keyboard->seat);
-		}
-		return;
-	}
-
 	char name[256];
 	xkb_keysym_get_name(symbol, name, sizeof(name));
 

@@ -34,9 +34,12 @@ struct vnc_av_frame {
 	int x, y, width, height;
 };
 
+struct pointer_collection;
+
 struct vnc_client {
 	rfbClient* client;
 
+	struct pointer_collection* pointer_collection;
 	struct data_control* data_control;
 	struct open_h264* open_h264;
 	bool current_rect_is_av_frame;
@@ -82,3 +85,7 @@ void vnc_client_send_cut_text(struct vnc_client* self, const char* text,
 		size_t len);
 void vnc_client_clear_av_frames(struct vnc_client* self);
 void cut_text (struct vnc_client* self, const char* text, size_t size);
+
+void vnc_client_set_pointer_collection(struct vnc_client* self,
+		struct pointer_collection* pointers);
+void vnc_client_set_use_remote_cursor(struct vnc_client* self, bool enable);

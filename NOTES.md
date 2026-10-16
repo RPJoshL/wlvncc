@@ -1,6 +1,7 @@
 ## Bauen und kopieren
 
 ```
+meson setup build
 ninja -C build && cp ./build/wlvncc /media/ubuntugui/videos/wlvncc
 ```
 

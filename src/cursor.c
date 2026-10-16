@@ -52,8 +52,11 @@ rfbBool HandleCursorShape(rfbClient* client,int xhot, int yhot, int width, int h
   bytesPerRow = (width + 7) / 8;
   bytesMaskData = bytesPerRow * height;
 
-  if (width * height == 0)
+  if (width * height == 0) {
+    if (client->GotCursorShape != NULL)
+      client->GotCursorShape(client, xhot, yhot, 0, 0, 0);
     return TRUE;
+  }
 
   if (width >= MAX_CURSOR_SIZE || height >= MAX_CURSOR_SIZE)
     return FALSE;
@@ -145,6 +148,7 @@ rfbBool HandleCursorShape(rfbClient* client,int xhot, int yhot, int width, int h
     return FALSE;
   }
 
+  free(client->rcMask);
   client->rcMask = malloc((size_t)width * height);
   if (client->rcMask == NULL) {
     free(client->rcSource);

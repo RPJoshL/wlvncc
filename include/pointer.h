@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <wayland-client.h>
 
 struct wl_cursor_theme;
@@ -41,6 +42,7 @@ struct pointer {
 	struct wl_list link;
 
 	struct seat* seat;
+	struct pointer_collection* collection;
 
 	uint32_t serial;
 	bool handle_event;
@@ -55,8 +57,6 @@ struct pointer {
 
 	struct wl_cursor_theme* cursor_theme;
 	struct wl_surface* cursor_surface;
-
-	enum pointer_cursor_type cursor_type;
 };
 
 struct pointer_collection {
@@ -65,6 +65,15 @@ struct pointer_collection {
 	bool (*handle_event)(struct wl_surface*);
 	enum pointer_cursor_type cursor_type;
 	void* userdata;
+
+	bool remote_cursor_active;
+	int remote_width;
+	int remote_height;
+	int remote_hotspot_x;
+	int remote_hotspot_y;
+	void* remote_pixels;
+	size_t remote_size;
+	struct wl_buffer* remote_buffer;
 };
 
 struct pointer_collection* pointer_collection_new(enum pointer_cursor_type);
@@ -74,3 +83,8 @@ int pointer_collection_add_wl_pointer(struct pointer_collection* self,
 		struct wl_pointer* wl_pointer, struct seat*);
 void pointer_collection_remove_wl_pointer(struct pointer_collection* self,
 		struct wl_pointer* wl_pointer);
+
+int pointer_collection_update_remote_cursor(struct pointer_collection* self,
+		const uint32_t* argb, int width, int height, int hotspot_x,
+		int hotspot_y);
+void pointer_collection_clear_remote_cursor(struct pointer_collection* self);

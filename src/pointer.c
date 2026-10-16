@@ -19,11 +19,14 @@
 #include <stdint.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <string.h>
+#include <sys/mman.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
 #include <linux/input-event-codes.h>
 
 #include "pointer.h"
+#include "shm.h"
 
 #define STEP_SIZE 15.0
 
@@ -47,18 +50,18 @@ static struct wl_cursor_theme* pointer_load_cursor_theme(void)
 }
 
 struct pointer* pointer_new(struct wl_pointer* wl_pointer,
-		enum pointer_cursor_type cursor_type, struct seat *seat)
+		struct pointer_collection* collection, struct seat* seat)
 {
 	struct pointer* self = calloc(1, sizeof(*self));
 	if (!self)
 		return NULL;
 
 	self->seat = seat;
+	self->collection = collection;
 	self->wl_pointer = wl_pointer;
-	self->cursor_type = cursor_type;
 	self->handle_event = false;
 
-	if (cursor_type == POINTER_CURSOR_LEFT_PTR)
+	if (collection->cursor_type == POINTER_CURSOR_LEFT_PTR)
 		self->cursor_theme = pointer_load_cursor_theme();
 
 	self->cursor_surface = wl_compositor_create_surface(wl_compositor);
@@ -88,6 +91,20 @@ struct pointer_collection* pointer_collection_new(
 	return self;
 }
 
+static void pointer_collection_destroy_remote_cursor(
+		struct pointer_collection* self)
+{
+	if (self->remote_buffer)
+		wl_buffer_destroy(self->remote_buffer);
+	if (self->remote_pixels)
+		munmap(self->remote_pixels, self->remote_size);
+
+	self->remote_buffer = NULL;
+	self->remote_pixels = NULL;
+	self->remote_size = 0;
+	self->remote_cursor_active = false;
+}
+
 void pointer_collection_destroy(struct pointer_collection* self)
 {
 	struct pointer* pointer;
@@ -97,6 +114,8 @@ void pointer_collection_destroy(struct pointer_collection* self)
 		wl_list_remove(&pointer->link);
 		pointer_destroy(pointer);
 	}
+
+	pointer_collection_destroy_remote_cursor(self);
 
 	free(self);
 }
@@ -122,9 +141,13 @@ static void pointer_update_cursor_none(struct pointer* self)
 
 static void pointer_update_cursor_left_ptr(struct pointer* self)
 {
+	if (!self->cursor_theme)
+		return;
+
 	struct wl_cursor* cursor = wl_cursor_theme_get_cursor(
 			self->cursor_theme, "left_ptr");
-	assert(cursor && cursor->image_count > 0);
+	if (!cursor || cursor->image_count <= 0)
+		return;
 
 	struct wl_cursor_image* image = cursor->images[0];
 
@@ -139,18 +162,116 @@ static void pointer_update_cursor_left_ptr(struct pointer* self)
 	wl_surface_commit(self->cursor_surface);
 }
 
+static void pointer_update_cursor_remote(struct pointer* self)
+{
+	struct pointer_collection* collection = self->collection;
+
+	assert(collection->remote_cursor_active);
+	assert(collection->remote_buffer);
+
+	wl_surface_attach(self->cursor_surface, collection->remote_buffer, 0,
+			0);
+	wl_pointer_set_cursor(self->wl_pointer, self->serial,
+			self->cursor_surface, collection->remote_hotspot_x,
+			collection->remote_hotspot_y);
+	wl_surface_damage_buffer(self->cursor_surface, 0, 0,
+			collection->remote_width, collection->remote_height);
+	wl_surface_commit(self->cursor_surface);
+}
+
 static void pointer_update_cursor(struct pointer* self)
 {
-	switch (self->cursor_type) {
-	case POINTER_CURSOR_NONE:
+	struct pointer_collection* collection = self->collection;
+
+	if (collection->cursor_type == POINTER_CURSOR_NONE) {
 		pointer_update_cursor_none(self);
-		return;
-	case POINTER_CURSOR_LEFT_PTR:
-		pointer_update_cursor_left_ptr(self);
 		return;
 	}
 
-	abort();
+	if (collection->remote_cursor_active) {
+		pointer_update_cursor_remote(self);
+		return;
+	}
+
+	pointer_update_cursor_left_ptr(self);
+}
+
+static void pointer_collection_refresh_cursors(struct pointer_collection* self)
+{
+	struct pointer* pointer;
+
+	wl_list_for_each(pointer, &self->pointers, link) {
+		if (!pointer->handle_event)
+			continue;
+		pointer_update_cursor(pointer);
+	}
+}
+
+int pointer_collection_update_remote_cursor(struct pointer_collection* self,
+		const uint32_t* argb, int width, int height, int hotspot_x,
+		int hotspot_y)
+{
+	size_t size = (size_t)width * height * 4;
+	int stride = width * 4;
+
+	if (width <= 0 || height <= 0 || !argb)
+		return -1;
+
+	if (!self->remote_pixels || self->remote_size != size) {
+		pointer_collection_destroy_remote_cursor(self);
+
+		int fd = shm_alloc_fd(size);
+		if (fd < 0)
+			return -1;
+
+		void* pixels = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED,
+				fd, 0);
+		if (pixels == MAP_FAILED) {
+			close(fd);
+			return -1;
+		}
+
+		struct wl_shm_pool* pool = wl_shm_create_pool(wl_shm, fd, size);
+		if (!pool) {
+			munmap(pixels, size);
+			close(fd);
+			return -1;
+		}
+
+		struct wl_buffer* buffer = wl_shm_pool_create_buffer(pool, 0,
+				width, height, stride, WL_SHM_FORMAT_ARGB8888);
+		wl_shm_pool_destroy(pool);
+		close(fd);
+
+		if (!buffer) {
+			munmap(pixels, size);
+			return -1;
+		}
+
+		self->remote_pixels = pixels;
+		self->remote_size = size;
+		self->remote_buffer = buffer;
+	}
+
+	memcpy(self->remote_pixels, argb, size);
+	self->remote_width = width;
+	self->remote_height = height;
+	self->remote_hotspot_x = hotspot_x;
+	self->remote_hotspot_y = hotspot_y;
+	self->remote_cursor_active = true;
+
+	pointer_collection_refresh_cursors(self);
+
+	return 0;
+}
+
+void pointer_collection_clear_remote_cursor(struct pointer_collection* self)
+{
+	if (!self->remote_cursor_active)
+		return;
+
+	self->remote_cursor_active = false;
+	pointer_collection_refresh_cursors(self);
 }
 
 static void pointer_enter(void* data, struct wl_pointer* wl_pointer,
@@ -167,7 +288,6 @@ static void pointer_enter(void* data, struct wl_pointer* wl_pointer,
 		return;
 
 	pointer->serial = serial;
-
 	pointer_update_cursor(pointer);
 }
 
@@ -227,6 +347,7 @@ static void pointer_button(void* data, struct wl_pointer* wl_pointer,
 		return;
 
 	pointer->serial = serial;
+	pointer_update_cursor(pointer);
 
 	switch (button) {
 	case BTN_LEFT:
@@ -320,7 +441,7 @@ static struct wl_pointer_listener pointer_listener = {
 int pointer_collection_add_wl_pointer(struct pointer_collection* self,
 		struct wl_pointer* wl_pointer, struct seat* seat)
 {
-	struct pointer* pointer = pointer_new(wl_pointer, self->cursor_type, seat);
+	struct pointer* pointer = pointer_new(wl_pointer, self, seat);
 	if (!pointer)
 		return -1;
 
@@ -335,5 +456,5 @@ void pointer_collection_remove_wl_pointer(struct pointer_collection* self,
 	struct pointer* pointer =
 		pointer_collection_find_wl_pointer(self, wl_pointer);
 	wl_list_remove(&pointer->link);
-	free(pointer);
+	pointer_destroy(pointer);
 }

@@ -787,7 +787,7 @@ void on_pointer_event(struct pointer_collection* collection,
 
 bool pointer_handle_event(struct wl_surface* wl_surface)
 {
-	return window->wl_surface == wl_surface;
+	return window && window->wl_surface == wl_surface;
 }
 
 void on_keyboard_event(struct keyboard_collection* collection,
@@ -1230,6 +1230,9 @@ int main(int argc, char* argv[])
 	vnc = vnc_client_create(data_control);
 	if (!vnc)
 		goto vnc_failure;
+
+	vnc_client_set_pointer_collection(vnc, pointers);
+	vnc_client_set_use_remote_cursor(vnc, cursor_type != POINTER_CURSOR_NONE);
 
 	vnc->alloc_fb = on_vnc_client_alloc_fb;
 	vnc->update_fb = on_vnc_client_update_fb;

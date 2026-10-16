@@ -28,6 +28,7 @@
 
 #include "rfbclient.h"
 #include "vnc.h"
+#include "pointer.h"
 #include "open-h264.h"
 #include "usdt.h"
 
@@ -136,6 +137,77 @@ static void vnc_client_got_cut_text(rfbClient* client, const char* text,
 
 	if (self->cut_text)
 		self->cut_text(self, text, len);
+}
+
+static uint32_t vnc_client_rfb_pixel_to_argb8888(rfbClient* client,
+		const uint8_t* src, int bytes_per_pixel)
+{
+	uint32_t pixel = 0;
+
+	switch (bytes_per_pixel) {
+	case 1:
+		pixel = *src;
+		break;
+	case 2:
+		pixel = *(const uint16_t*)src;
+		break;
+	case 4:
+		pixel = *(const uint32_t*)src;
+		break;
+	default:
+		return 0;
+	}
+
+	uint32_t r = (pixel >> client->format.redShift) & client->format.redMax;
+	uint32_t g = (pixel >> client->format.greenShift) &
+			client->format.greenMax;
+	uint32_t b = (pixel >> client->format.blueShift) &
+			client->format.blueMax;
+
+	if (client->format.redMax)
+		r = r * 0x100 / (client->format.redMax + 1);
+	if (client->format.greenMax)
+		g = g * 0x100 / (client->format.greenMax + 1);
+	if (client->format.blueMax)
+		b = b * 0x100 / (client->format.blueMax + 1);
+
+	return (0xffu << 24) | (r << 16) | (g << 8) | b;
+}
+
+static void vnc_client_got_cursor_shape(rfbClient* client, int xhot, int yhot,
+		int width, int height, int bytes_per_pixel)
+{
+	struct vnc_client* self = rfbClientGetClientData(client, NULL);
+	assert(self);
+
+	if (!self->pointer_collection)
+		return;
+
+	if (width <= 0 || height <= 0) {
+		pointer_collection_clear_remote_cursor(self->pointer_collection);
+		return;
+	}
+
+	size_t n_pixels = (size_t)width * height;
+	uint32_t* argb = malloc(n_pixels * sizeof(uint32_t));
+	if (!argb)
+		return;
+
+	for (size_t i = 0; i < n_pixels; ++i) {
+		const uint8_t* src = client->rcSource + i * bytes_per_pixel;
+
+		if (!client->rcMask[i]) {
+			argb[i] = 0;
+			continue;
+		}
+
+		argb[i] = vnc_client_rfb_pixel_to_argb8888(client, src,
+				bytes_per_pixel);
+	}
+
+	pointer_collection_update_remote_cursor(self->pointer_collection, argb,
+			width, height, xhot, yhot);
+	free(argb);
 }
 
 static rfbBool vnc_client_handle_open_h264_rect(rfbClient* client,
@@ -249,6 +321,7 @@ struct vnc_client* vnc_client_create(struct data_control* data_control)
 	client->StartingFrameBufferUpdate = vnc_client_start_update;
 	client->CancelledFrameBufferUpdate = vnc_client_cancel_update;
 	client->GotXCutText = vnc_client_got_cut_text;
+	client->GotCursorShape = vnc_client_got_cursor_shape;
 	self->cut_text = cut_text;
 
 	self->pts = NO_PTS;
@@ -415,14 +488,15 @@ int vnc_client_process(struct vnc_client* self)
 	if (!vnc_client_lock_handler(self))
 		return 0;
 
-	int rc;
-	while (self->client->buffered > 0) {
+	int rc = 0;
+	if (self->client->buffered > 0)
 		rc = HandleRFBServerMessage(self->client) ? 0 : -1;
-		if (rc < 0)
-			break;
-	}
 
 	vnc_client_unlock_handler(self);
+
+	if (self->pointer_collection)
+		pointer_collection_flush_remote_cursor(self->pointer_collection);
+
 	return rc;
 }
 
@@ -464,6 +538,22 @@ void vnc_client_set_compression_level(struct vnc_client* self, int value)
 void vnc_client_send_cut_text(struct vnc_client* self, const char* text,
 		size_t len)
 {
-	// libvncclient doesn't modify text, so typecast is OK.
-	SendClientCutText(self->client, (char*)text, len);
+	if (len > INT_MAX) {
+		fprintf(stderr, "clipboard too large for RFB (%zu bytes)\n", len);
+		return;
+	}
+
+	if (!SendClientCutText(self->client, (char*)text, (int)len))
+		fprintf(stderr, "SendClientCutText failed\n");
+}
+
+void vnc_client_set_pointer_collection(struct vnc_client* self,
+		struct pointer_collection* pointers)
+{
+	self->pointer_collection = pointers;
+}
+
+void vnc_client_set_use_remote_cursor(struct vnc_client* self, bool enable)
+{
+	self->client->appData.useRemoteCursor = enable ? TRUE : FALSE;
 }

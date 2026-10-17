@@ -193,6 +193,11 @@ static void pointer_update_cursor(struct pointer* self)
 		return;
 	}
 
+	if (collection->remote_cursor_received) {
+		pointer_update_cursor_none(self);
+		return;
+	}
+
 	pointer_update_cursor_left_ptr(self);
 }
 
@@ -259,6 +264,7 @@ int pointer_collection_update_remote_cursor(struct pointer_collection* self,
 	self->remote_hotspot_x = hotspot_x;
 	self->remote_hotspot_y = hotspot_y;
 	self->remote_cursor_active = true;
+	self->remote_cursor_received = true;
 
 	pointer_collection_refresh_cursors(self);
 
@@ -267,10 +273,11 @@ int pointer_collection_update_remote_cursor(struct pointer_collection* self,
 
 void pointer_collection_clear_remote_cursor(struct pointer_collection* self)
 {
-	if (!self->remote_cursor_active)
+	if (!self->remote_cursor_active && !self->remote_cursor_received)
 		return;
 
 	self->remote_cursor_active = false;
+	self->remote_cursor_received = true;
 	pointer_collection_refresh_cursors(self);
 }
 

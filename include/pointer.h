@@ -67,6 +67,7 @@ struct pointer_collection {
 	void* userdata;
 
 	bool remote_cursor_active;
+	bool remote_cursor_received;
 	int remote_width;
 	int remote_height;
 	int remote_hotspot_x;

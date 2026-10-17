@@ -140,24 +140,32 @@ static void vnc_client_got_cut_text(rfbClient* client, const char* text,
 		self->cut_text(self, text, len);
 }
 
+static uint32_t vnc_client_expand_component(uint32_t value, uint32_t max)
+{
+	if (!max)
+		return 0;
+
+	return (value * 255 + max / 2) / max;
+}
+
 static uint32_t vnc_client_rfb_pixel_to_argb8888(rfbClient* client,
 		const uint8_t* src, int bytes_per_pixel)
 {
 	uint32_t pixel = 0;
 
-	switch (bytes_per_pixel) {
-	case 1:
-		pixel = *src;
-		break;
-	case 2:
-		pixel = *(const uint16_t*)src;
-		break;
-	case 4:
-		pixel = *(const uint32_t*)src;
-		break;
-	default:
-		return 0;
-	}
+    switch (bytes_per_pixel) {
+    case 1:
+        pixel = *src;
+        break;
+    case 2:
+        memcpy(&pixel, src, sizeof(uint16_t));
+        break;
+    case 4:
+        memcpy(&pixel, src, sizeof(uint32_t));
+        break;
+    default:
+        return 0;
+    }
 
 	uint32_t r = (pixel >> client->format.redShift) & client->format.redMax;
 	uint32_t g = (pixel >> client->format.greenShift) &
@@ -165,14 +173,19 @@ static uint32_t vnc_client_rfb_pixel_to_argb8888(rfbClient* client,
 	uint32_t b = (pixel >> client->format.blueShift) &
 			client->format.blueMax;
 
-	if (client->format.redMax)
-		r = r * 0x100 / (client->format.redMax + 1);
-	if (client->format.greenMax)
-		g = g * 0x100 / (client->format.greenMax + 1);
-	if (client->format.blueMax)
-		b = b * 0x100 / (client->format.blueMax + 1);
+	r = vnc_client_expand_component(r, client->format.redMax);
+	g = vnc_client_expand_component(g, client->format.greenMax);
+	b = vnc_client_expand_component(b, client->format.blueMax);
 
-	return (0xffu << 24) | (r << 16) | (g << 8) | b;
+	uint32_t a = 0xffu;
+	if (bytes_per_pixel == 4) {
+		uint32_t src_a = pixel >> 24;
+
+		if (client->format.redMax == 0xff)
+			src_a = vnc_client_expand_component(src_a, 0xff);
+	}
+
+	return (a << 24) | (r << 16) | (g << 8) | b;
 }
 
 static void vnc_client_got_cursor_shape(rfbClient* client, int xhot, int yhot,
@@ -194,16 +207,27 @@ static void vnc_client_got_cursor_shape(rfbClient* client, int xhot, int yhot,
 	if (!argb)
 		return;
 
+	bool any_visible = false;
+
 	for (size_t i = 0; i < n_pixels; ++i) {
 		const uint8_t* src = client->rcSource + i * bytes_per_pixel;
+		bool masked = client->rcMask[i];
 
-		if (!client->rcMask[i]) {
+		if (!masked) {
 			argb[i] = 0;
 			continue;
 		}
 
 		argb[i] = vnc_client_rfb_pixel_to_argb8888(client, src,
 				bytes_per_pixel);
+		if (argb[i] >> 24)
+			any_visible = true;
+	}
+
+	if (!any_visible) {
+		free(argb);
+		pointer_collection_clear_remote_cursor(self->pointer_collection);
+		return;
 	}
 
 	pointer_collection_update_remote_cursor(self->pointer_collection, argb,

@@ -152,8 +152,9 @@ static void on_seat_capability_change(struct seat* seat)
 		keyboard_collection_add_wl_keyboard(keyboards, wl_keyboard, seat);
 
 		if (copy_paste) {
-			data_control = malloc(sizeof(data_control));
-			data_control_init(data_control, seat, manager);
+			data_control = calloc(1, sizeof(*data_control));
+			if (data_control)
+				data_control_init(data_control, seat, manager);
 		}
 	} else {
 		// TODO Remove

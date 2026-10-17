@@ -24,6 +24,7 @@
 #include <libdrm/drm_fourcc.h>
 #include <libavutil/frame.h>
 #include <stdio.h>
+#include <aml.h>
 #include <data-control.h>
 
 #include "rfbclient.h"
@@ -333,13 +334,58 @@ failure:
 	return NULL;
 }
 
-void cut_text (struct vnc_client* self, const char* text, size_t size) {
-	if (!self->data_control) {
+struct cut_text_apply_job {
+	struct vnc_client* client;
+	char* data;
+	size_t len;
+};
+
+static void cut_text_apply_idle(struct aml_idle* idle)
+{
+	struct cut_text_apply_job* job = aml_idle_get_userdata(idle);
+
+	if (job->client->data_control)
+		data_control_to_clipboard(job->client->data_control, job->data,
+				job->len);
+
+	aml_stop(aml_get_default(), idle);
+}
+
+static void cut_text_apply_job_free(void* userdata)
+{
+	struct cut_text_apply_job* job = userdata;
+	free(job->data);
+	free(job);
+}
+
+void cut_text(struct vnc_client* self, const char* text, size_t size)
+{
+	if (!self->data_control || !size)
+		return;
+
+	struct cut_text_apply_job* job = malloc(sizeof(*job));
+	if (!job)
+		return;
+
+	job->data = malloc(size);
+	if (!job->data) {
+		free(job);
 		return;
 	}
 
-	data_control_to_clipboard(self->data_control, text, size);
-	//printf("Received string FROM vnc_server: %s\n", text);
+	memcpy(job->data, text, size);
+	job->len = size;
+	job->client = self;
+
+	struct aml_idle* idle = aml_idle_new(cut_text_apply_idle, job,
+			cut_text_apply_job_free);
+	if (!idle) {
+		cut_text_apply_job_free(job);
+		return;
+	}
+
+	aml_start(aml_get_default(), idle);
+	aml_unref(idle);
 }
 
 void vnc_client_destroy(struct vnc_client* self)
@@ -493,9 +539,6 @@ int vnc_client_process(struct vnc_client* self)
 		rc = HandleRFBServerMessage(self->client) ? 0 : -1;
 
 	vnc_client_unlock_handler(self);
-
-	if (self->pointer_collection)
-		pointer_collection_flush_remote_cursor(self->pointer_collection);
 
 	return rc;
 }

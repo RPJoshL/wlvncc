@@ -153,9 +153,16 @@ WriteToRFBServer(rfbClient* client, const char *buf, unsigned int n)
 
 		fds.fd = client->sock;
 		fds.events = POLLOUT;
-		if (poll(&fds, 1, -1) <= 0) {
+		int pr = poll(&fds, 1, 50);
+		if (pr < 0) {
+			if (errno == EINTR)
+				continue;
 			rfbClientErr("poll\n");
 			return FALSE;
+		}
+		if (pr == 0) {
+			run_main_loop_once();
+			continue;
 		}
 	}
 

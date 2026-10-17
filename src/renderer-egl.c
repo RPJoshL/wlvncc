@@ -326,19 +326,26 @@ static void dmabuf_attr_append_planes(EGLint* dst, int* index,
 	struct AVDRMPlaneDescriptor *plane;
 	struct AVDRMObjectDescriptor *obj;
 
+	int plane_idx = 0;
+
 	for (int i = 0; i < desc->nb_layers; ++i) {
-		assert(desc->layers[i].nb_planes == 1);
+		struct AVDRMLayerDescriptor* layer = &desc->layers[i];
 
-		plane = &desc->layers[i].planes[0];
-		obj = &desc->objects[plane->object_index];
+		for (int j = 0; j < layer->nb_planes; ++j) {
+			plane = &layer->planes[j];
+			obj = &desc->objects[plane->object_index];
 
-		append_attr(dst, index, plane_fd_key(i), obj->fd);
-		append_attr(dst, index, plane_offset_key(i), plane->offset);
-		append_attr(dst, index, plane_pitch_key(i), plane->pitch);
-		append_attr(dst, index, plane_modifier_lo_key(i),
-				obj->format_modifier);
-		append_attr(dst, index, plane_modifier_hi_key(i),
-				obj->format_modifier >> 32);
+			append_attr(dst, index, plane_fd_key(plane_idx), obj->fd);
+			append_attr(dst, index, plane_offset_key(plane_idx),
+					plane->offset);
+			append_attr(dst, index, plane_pitch_key(plane_idx),
+					plane->pitch);
+			append_attr(dst, index, plane_modifier_lo_key(plane_idx),
+					(uint32_t)(obj->format_modifier & 0xffffffffu));
+			append_attr(dst, index, plane_modifier_hi_key(plane_idx),
+					(uint32_t)(obj->format_modifier >> 32));
+			plane_idx++;
+		}
 	}
 }
 
@@ -384,17 +391,14 @@ static GLuint texture_from_av_frame(const struct AVFrame* frame)
 
 	EGLImageKHR image = eglCreateImageKHR(egl_display, EGL_NO_CONTEXT,
 				EGL_LINUX_DMA_BUF_EXT, NULL, attr);
-	assert(image != EGL_NO_IMAGE_KHR);
+	if (image == EGL_NO_IMAGE_KHR)
+		return 0;
 
 	GLuint tex = 0;
 	glGenTextures(1, &tex);
-
 	glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
-
 	glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
-
 	eglDestroyImageKHR(egl_display, image);
-
 	glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
 	return tex;
 }
@@ -545,11 +549,13 @@ void render_av_frames_egl(struct buffer* dst, struct vnc_av_frame** src,
 		glViewport(frame->x, frame->y, frame->width, frame->height);
 
 		GLuint tex = texture_from_av_frame(frame->frame);
+		if (!tex)
+			continue;
+
 		glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
-
 		gl_draw();
-
 		glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
+		glDeleteTextures(1, &tex);
 	}
 
 	glDisable(GL_SCISSOR_TEST);
